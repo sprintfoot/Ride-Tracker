@@ -561,6 +561,7 @@ document.getElementById('btnPause').addEventListener('click', ()=>{
 
 document.getElementById('btnStop').addEventListener('click', ()=>{
   if(state.points.length < 2){
+    alert('Only ' + state.points.length + ' GPS point(s) were recorded, so there\'s nothing to save. This usually means GPS never locked on — check the status indicator at the top says a fix (e.g. "12m fix"), not "Permission denied" or "Signal lost", before starting your next ride.');
     finishRide(false);
     return;
   }

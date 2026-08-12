@@ -200,6 +200,7 @@
         <button class="btn-ghost" id="btnSegEnd">🏁 Mark Segment End</button>
       </div>
       <div class="hint">Keep this tab open and your screen on while recording — mobile browsers pause GPS updates when the screen locks or the tab is backgrounded. For best accuracy, ride with a clear view of the sky.</div>
+      <button class="btn-ghost" id="btnTestVoice" style="margin-top:10px; width:100%;">🔊 Test Voice</button>
     </section>
 
     <!-- HISTORY -->
@@ -331,10 +332,21 @@ function speak(text){
   if(!state.voiceEnabled) return;
   try{
     if(!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel(); // clear any stuck/queued utterance (common Chrome/Android bug)
     const u = new SpeechSynthesisUtterance(text);
     u.rate = 1;
+    u.lang = 'en-US';
+    u.volume = 1;
+    const voices = window.speechSynthesis.getVoices();
+    const enVoice = voices.find(v => v.lang && v.lang.startsWith('en'));
+    if(enVoice) u.voice = enVoice;
     window.speechSynthesis.speak(u);
   }catch(e){ console.error('speech failed', e); }
+}
+// Some Android Chrome builds load voices asynchronously; warm it up early.
+if('speechSynthesis' in window){
+  window.speechSynthesis.getVoices();
+  window.speechSynthesis.onvoiceschanged = ()=> window.speechSynthesis.getVoices();
 }
 function checkMileAnnouncement(distM, elapsedMs){
   const miles = distM / 1609.344;
@@ -905,6 +917,17 @@ document.getElementById('btnVoiceToggle').addEventListener('click', async ()=>{
   updateVoiceButton();
   await sSet('voice-enabled', state.voiceEnabled);
   if(state.voiceEnabled) speak('Voice announcements on');
+});
+document.getElementById('btnTestVoice').addEventListener('click', ()=>{
+  if(!state.voiceEnabled){
+    alert('Voice announcements are muted — tap the speaker icon at the top to turn them on first.');
+    return;
+  }
+  if(!('speechSynthesis' in window)){
+    alert('This browser does not support spoken announcements.');
+    return;
+  }
+  speak('Testing, one two three. If you can hear this, voice announcements are working.');
 });
 
 /* ---------------- init ---------------- */

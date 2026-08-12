@@ -168,7 +168,10 @@
 
   <header class="topbar">
     <div class="brand"><span class="dot"></span>RIDEHEAD</div>
-    <div class="gps" id="gpsIndicator"><span class="pip"></span><span id="gpsText">GPS idle</span></div>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <button id="btnVoiceToggle" style="background:transparent; color:var(--lime); font-size:16px; padding:2px; line-height:1;" title="Toggle voice announcements">🔊</button>
+      <div class="gps" id="gpsIndicator"><span class="pip"></span><span id="gpsText">GPS idle</span></div>
+    </div>
   </header>
 
   <main>
@@ -324,6 +327,26 @@ function fmtDate(iso){
   return d.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'}) + ' · ' + d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
 }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,8); }
+function speak(text){
+  if(!state.voiceEnabled) return;
+  try{
+    if(!('speechSynthesis' in window)) return;
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1;
+    window.speechSynthesis.speak(u);
+  }catch(e){ console.error('speech failed', e); }
+}
+function checkMileAnnouncement(distM, elapsedMs){
+  const miles = distM / 1609.344;
+  const mileMark = Math.floor(miles);
+  if(mileMark >= 1 && mileMark > state.lastAnnouncedMile){
+    state.lastAnnouncedMile = mileMark;
+    const elapsedH = (elapsedMs/1000)/3600;
+    const avgMph = elapsedH > 0 ? miles/elapsedH : 0;
+    const label = mileMark + (mileMark===1 ? ' mile' : ' miles');
+    speak(`${label}. Average speed ${avgMph.toFixed(1)} miles per hour.`);
+  }
+}
 function rideDefaultName(){
   const h = new Date().getHours();
   const period = h<11 ? 'Morning' : h<17 ? 'Afternoon' : 'Evening';
@@ -339,6 +362,8 @@ const state = {
   wakeLock:null,
   segMarkStart:null, // {lat,lng,tElapsed}
   segments:[], // loaded on demand
+  voiceEnabled:true,
+  lastAnnouncedMile:0,
   activeSegTimers:{}, // segId -> {startElapsed}
   finishedSegsThisRide:new Set(),
   pendingSaveTrack:null,
@@ -402,6 +427,7 @@ function onGeoSuccess(pos){
   recordPolyline.addLatLng([lat,lng]);
 
   updateLiveStats(point);
+  checkMileAnnouncement(totalDistance(state.points), tElapsed);
   checkSegments(lat,lng,tElapsed);
 }
 function onGeoError(err){
@@ -522,6 +548,7 @@ function resetRideState(){
   state.pausedAccum = 0;
   state.finishedSegsThisRide = new Set();
   state.activeSegTimers = {};
+  state.lastAnnouncedMile = 0;
   recordPolyline.setLatLngs([]);
   document.getElementById('segLive').classList.remove('show');
   document.getElementById('rElapsed').textContent = '00:00:00';
@@ -540,6 +567,7 @@ document.getElementById('btnStart').addEventListener('click', async ()=>{
   state.pendingRideId = uid();
   startWatch();
   requestWakeLock();
+  speak('Begin biking');
   document.getElementById('btnStart').style.display = 'none';
   document.getElementById('activeControls').style.display = 'flex';
   document.getElementById('segmentRow').style.display = 'flex';
@@ -560,6 +588,7 @@ document.getElementById('btnPause').addEventListener('click', ()=>{
 });
 
 document.getElementById('btnStop').addEventListener('click', ()=>{
+  speak('Ride ending');
   if(state.points.length < 2){
     alert('Only ' + state.points.length + ' GPS point(s) were recorded, so there\'s nothing to save. This usually means GPS never locked on — check the status indicator at the top says a fix (e.g. "12m fix"), not "Permission denied" or "Signal lost", before starting your next ride.');
     finishRide(false);
@@ -865,6 +894,19 @@ document.querySelectorAll('.tab').forEach(btn=>{
   });
 });
 
+/* ---------------- voice toggle ---------------- */
+function updateVoiceButton(){
+  const btn = document.getElementById('btnVoiceToggle');
+  btn.textContent = state.voiceEnabled ? '🔊' : '🔇';
+  btn.style.color = state.voiceEnabled ? 'var(--lime)' : 'var(--muted)';
+}
+document.getElementById('btnVoiceToggle').addEventListener('click', async ()=>{
+  state.voiceEnabled = !state.voiceEnabled;
+  updateVoiceButton();
+  await sSet('voice-enabled', state.voiceEnabled);
+  if(state.voiceEnabled) speak('Voice announcements on');
+});
+
 /* ---------------- init ---------------- */
 initRecordMap();
 loadSegments();
@@ -872,6 +914,7 @@ refreshHistory();
 refreshStats();
 refreshSegments();
 setGpsStatus('','GPS idle — tap Start Ride');
+sGet('voice-enabled', true).then(v=>{ state.voiceEnabled = v; updateVoiceButton(); });
 
 })();
 </script>

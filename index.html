@@ -348,15 +348,41 @@ if('speechSynthesis' in window){
   window.speechSynthesis.getVoices();
   window.speechSynthesis.onvoiceschanged = ()=> window.speechSynthesis.getVoices();
 }
+function spokenDuration(ms){
+  const totalSec = Math.floor(ms/1000);
+  const h = Math.floor(totalSec/3600);
+  const m = Math.floor((totalSec%3600)/60);
+  const s = totalSec%60;
+  const parts = [];
+  if(h>0) parts.push(h + (h===1?' hour':' hours'));
+  if(m>0 || h>0) parts.push(m + (m===1?' minute':' minutes'));
+  parts.push(s + (s===1?' second':' seconds'));
+  return parts.join(' ');
+}
 function checkMileAnnouncement(distM, elapsedMs){
   const miles = distM / 1609.344;
   const mileMark = Math.floor(miles);
   if(mileMark >= 1 && mileMark > state.lastAnnouncedMile){
     state.lastAnnouncedMile = mileMark;
+
+    const splitMs = elapsedMs - state.lastMileTime;
+    state.lastMileTime = elapsedMs;
+    const splitSpeedMph = splitMs > 0 ? (1 / (splitMs/3600000)) : 0;
+    state.rideMileSplits.push({mile:mileMark, speedMph:splitSpeedMph});
+
     const elapsedH = (elapsedMs/1000)/3600;
     const avgMph = elapsedH > 0 ? miles/elapsedH : 0;
     const label = mileMark + (mileMark===1 ? ' mile' : ' miles');
-    speak(`${label}. Average speed ${avgMph.toFixed(1)} miles per hour.`);
+
+    let text = `${label}. Total time ${spokenDuration(elapsedMs)}. Average speed ${avgMph.toFixed(1)} miles per hour.`;
+    const prevBest = state.bestMileSpeed;
+    if(prevBest && splitSpeedMph > prevBest.speedMph){
+      text += ` New fastest mile ever! Previous best was ${prevBest.speedMph.toFixed(1)} miles per hour.`;
+      state.bestMileSpeed = {speedMph: splitSpeedMph, rideId: state.pendingRideId, date: new Date().toISOString()};
+    } else if(!prevBest){
+      state.bestMileSpeed = {speedMph: splitSpeedMph, rideId: state.pendingRideId, date: new Date().toISOString()};
+    }
+    speak(text);
   }
 }
 function rideDefaultName(){
@@ -376,6 +402,9 @@ const state = {
   segments:[], // loaded on demand
   voiceEnabled:true,
   lastAnnouncedMile:0,
+  lastMileTime:0,
+  rideMileSplits:[], // {mile, speedMph} for the ride currently in progress
+  bestMileSpeed:null, // loaded from storage at ride start: {speedMph,rideId,date} — fastest single mile ever ridden
   activeSegTimers:{}, // segId -> {startElapsed}
   finishedSegsThisRide:new Set(),
   pendingSaveTrack:null,
@@ -561,6 +590,8 @@ function resetRideState(){
   state.finishedSegsThisRide = new Set();
   state.activeSegTimers = {};
   state.lastAnnouncedMile = 0;
+  state.lastMileTime = 0;
+  state.rideMileSplits = [];
   recordPolyline.setLatLngs([]);
   document.getElementById('segLive').classList.remove('show');
   document.getElementById('rElapsed').textContent = '00:00:00';
@@ -572,6 +603,7 @@ function resetRideState(){
 
 document.getElementById('btnStart').addEventListener('click', async ()=>{
   await loadSegments();
+  state.bestMileSpeed = await sGet('best-mile-speed', null);
   resetRideState();
   state.tracking = true;
   state.paused = false;
@@ -657,6 +689,15 @@ async function finishRide(save, name){
       if(s.best && s.best.rideId === 'in-progress'){ s.best.rideId = id; changed = true; }
     }
     if(changed) await sSet('segments', segments);
+
+    // persist a new fastest-mile-ever record if this ride beat it
+    if(state.rideMileSplits.length){
+      const bestMileSpeed = await sGet('best-mile-speed', null);
+      const fastestThisRide = state.rideMileSplits.reduce((a,b)=> b.speedMph > a.speedMph ? b : a);
+      if(!bestMileSpeed || fastestThisRide.speedMph > bestMileSpeed.speedMph){
+        await sSet('best-mile-speed', {speedMph: fastestThisRide.speedMph, rideId: id, date: new Date().toISOString()});
+      }
+    }
   }
 
   resetRideState();
